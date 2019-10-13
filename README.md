@@ -112,6 +112,60 @@ JTA（Java Transaction API）即 Java 事务 API 和 JTS（Java Transaction Serv
         // throw new RuntimeException("xx");
     }
 ```
+并发测试
+```java
+    /**
+     * 并发测试
+     * 同时开启多个全局事务
+     * 每个全局事务对应两个分支事务
+     *
+     * 暂时未做远程事务支持
+     * @param threadNum
+     */
+    private static void concurrentTest(int threadNum) {
+        final CountDownLatch countDownLatch = new CountDownLatch(threadNum);
+
+        for (int i = 0; i < threadNum; i++) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        countDownLatch.await();
+                        // 开启全局事务
+                        transactionManager.begin();
+                        // 向服务器 A 数据库写入数据
+                        saveDB1();
+                        // 向服务器 B 数据库写入数据
+                        saveDB2();
+                        // 询问 RM 分支事务是否准备就绪
+                        boolean prepareSuccess = transactionManager.prepare();
+                        // 目前没有涉及到远程事务的支持，在本地都是同步的方式调用所以此处没有做做阻塞等待而是返回立刻知道是否成功
+                        // 如果涉及到远程事务的支持，那么此处应该就有一个阻塞唤醒机制
+                        if (prepareSuccess) {
+                            // 开始提交分支事务
+                            transactionManager.commit();
+                        } else {
+                            // 回滚
+                            transactionManager.rollback();
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        // 如果出错了就进行回滚各分支事务
+                        try {
+                            transactionManager.rollback();
+                        } catch (Exception e1) {
+                            e1.printStackTrace();
+                        }
+                    } finally {
+                        // 资源回收
+                        GlobalInfo.remove();
+                    }
+                }
+            }).start();
+            countDownLatch.countDown();
+        }
+    }
+```
 #### 包结构
 ![](https://user-gold-cdn.xitu.io/2019/10/13/16dc48473aeccdf5?w=538&h=606&f=png&s=57765)
 - db：中存放了数据库连接池的实现，可以实现多数据源的切换
